@@ -27,6 +27,8 @@ jobs:
         run: |
           mkdir _site
           cp index.html _site/index.html
+          mkdir -p _site/curriculum
+          cp curriculum/index.html curriculum/app.js curriculum/holidays.js _site/curriculum/
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
