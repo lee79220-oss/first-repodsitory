@@ -21,7 +21,9 @@ async function request(path, {method = 'GET', body, auth = '', returning = false
   if (auth) headers.Authorization = 'Bearer ' + auth;
   if (body) headers['Content-Type'] = 'application/json';
   if (returning) headers.Prefer = 'return=representation';
-  const res = await fetch(CLOUD + path, {method, headers, body: body && JSON.stringify(body)});
+  const res = await fetch(CLOUD + path, {
+    method, headers, cache: 'no-store', body: body && JSON.stringify(body)
+  });
   if (!res.ok) throw new Error(String(res.status));
   return res.json();
 }
@@ -66,13 +68,18 @@ async function writeSchedule(events, message) {
     shared.set(year, {exists: true, events: row.events});
     if (state.year === year) { state.revision++; save(false); }
     toast(message);
+    return true;
   } catch (error) {
     if (error.message === '401') token = '';
     toast(error.message === '409' ? '다른 편집자의 변경을 불러왔습니다. 확인 후 다시 편집하세요.' :
       '공유 일정 저장에 실패했습니다. 연결과 편집 권한을 확인하세요.');
+    return false;
   } finally {
     busy = false;
-    await readSchedule();
+    // The write response already contains the authoritative schedule.
+    // Refresh only after a failure or if the user navigated to a different year.
+    if (state.year !== year || shared.get(year) === snapshot) await readSchedule();
+    else render();
   }
 }
 
@@ -184,11 +191,17 @@ $('#eventList').onclick = event => {
   edit(row.dataset.id);
 };
 $('#eventForm').onsubmit=e=>{e.preventDefault();if(!editable())return;let start=$('#start').value,end=$('#end').value,[a,b]=bounds();if(start>end||start<a||end>b)return toast('학년도 안의 올바른 기간을 선택하세요.');let item={id:editing||crypto.randomUUID(),name:$('#name').value.trim(),type:$('#type').value,start,end,grade:$('#eventGrade').value};if(!item.name)return;const events=eventsForYear();if(editing&&!events.some(x=>x.id===editing))return;$('#editor').close();writeSchedule(editing?events.map(x=>x.id===editing?item:x):[...events,item],'공유 일정을 저장했습니다.')};
-function deleteEvent(id) {
+async function deleteEvent(id) {
   const events = eventsForYear();
   if (!editable() || !events.some(item => item.id === id)) return;
-  if ($('#editor').open) $('#editor').close();
-  writeSchedule(events.filter(item => item.id !== id), '공유 일정을 삭제했습니다.');
+  const dialog = $('#editor');
+  const fromDialog = dialog.open;
+  if (fromDialog) dialog.close();
+  const saved = await writeSchedule(events.filter(item => item.id !== id), '공유 일정을 삭제했습니다.');
+  if (!saved && fromDialog && editable() && eventsForYear().some(item => item.id === id)) {
+    edit(id);
+    $('#editorTitle').textContent = '일정 수정 · 삭제 실패';
+  }
 }
 $('#add').onclick = () => {
   if (selection) {
