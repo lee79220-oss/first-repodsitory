@@ -203,6 +203,7 @@ async function deleteEvent(id) {
     $('#editorTitle').textContent = '일정 수정 · 삭제 실패';
   }
 }
+$('#delete').onclick = () => deleteEvent(editing);
 $('#add').onclick = () => {
   if (selection) {
     const dates = [selection.start, selection.end].sort();
