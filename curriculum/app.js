@@ -1,7 +1,7 @@
 const $=s=>document.querySelector(s),pad=n=>String(n).padStart(2,'0'),date=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`,parse=s=>new Date(s+'T12:00:00'),shift=(s,n)=>{let d=parse(s);d.setDate(d.getDate()+n);return date(d)},esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const KEY='geumsan-planner-v1',subjects=['국어','수학','사회','과학','체육','음악','미술','영어','창의적 체험활동','학교자율시간'];
 function defaults(y){return {year:y,school:'금산초등학교',semester:`${y}-08-24`,events:[{id:'sample1',name:'여름방학 (예시)',type:'break',start:`${y}-07-24`,end:`${y}-08-23`,grade:'all'},{id:'sample2',name:'겨울방학 (예시)',type:'break',start:`${y+1}-01-09`,end:`${y+1}-02-28`,grade:'all'},{id:'sample3',name:'현장체험학습 (예시)',type:'trip',start:`${y}-05-12`,end:`${y}-05-12`,grade:'all'}],hours:{},plans:{},revision:0}}
-let db;try{db=JSON.parse(localStorage.getItem(KEY))}catch{}if(!db||!db.years)db={years:{2026:defaults(2026)},current:2026};let state=db.years[db.current],month=state.year*12+2,annual=false,editing=null,history=[],selection=null,dragId=null;
+let db;try{db=JSON.parse(localStorage.getItem(KEY))}catch{}if(!db||!db.years)db={years:{2026:defaults(2026)},current:2026};let state=db.years[db.current],month=state.year*12+2,annual=false,editing=null,history=[],selection=null,selectionGesture=null,dragId=null;
 function toast(t){$('#toast').textContent=t;$('#toast').classList.remove('hidden');setTimeout(()=>$('#toast').classList.add('hidden'),2600)}
 function checkpoint(){history.push(JSON.stringify(db));if(history.length>30)history.shift()}
 function save(revise=true){if(revise)state.revision++;db.years[state.year]=state;try{localStorage.setItem(KEY,JSON.stringify(db));$('#saved').textContent='✓ 이 브라우저에 저장됨'}catch{toast('저장 공간이 부족합니다. 백업 파일을 저장하세요.')}render()}
@@ -14,18 +14,82 @@ function teaching(s,g){let ev=eventsOn(s,g);if(ev.some(e=>['off','break','holida
 function summary(g){let all=days(),open=all.filter(s=>teaching(s,g)),week=Array(7).fill(0);open.forEach(s=>week[parse(s).getDay()]++);return {all,open,week,first:open.filter(s=>s<state.semester).length,second:open.filter(s=>s>=state.semester).length}}
 function render(){let g=$('#grade').value||'all',s=summary(g);$('#stats').innerHTML=[['연간 수업일수',s.open.length+'일'],['1학기 / 2학기',s.first+' / '+s.second+'일'],['휴업일수',s.all.length-s.open.length+'일'],['등록된 일정',state.events.length+'건']].map(([a,b])=>`<div class="stat"><small>${a}</small><b>${b}</b></div>`).join('');$('#school').value=state.school;$('#semester').value=state.semester;renderCalendar();$('#weekStats').innerHTML=['일','월','화','수','목','금','토'].map((v,i)=>`<div style="display:flex;justify-content:space-between;padding:5px"><span>${v}요일</span><b>${s.week[i]}일</b></div>`).join('');renderHours();renderPlan()}
 function calendarHTML(y,m,mini=false){let first=new Date(y,m,1,12),start=new Date(y,m,1-first.getDay(),12),count=Math.ceil((first.getDay()+new Date(y,m+1,0).getDate())/7)*7,g=$('#grade').value;let html='<div class="grid">'+['일','월','화','수','목','금','토'].map(x=>`<div class="weekday">${x}</div>`).join('');for(let i=0;i<count;i++){let d=new Date(start);d.setDate(start.getDate()+i);let s=date(d),inside=d.getMonth()===m,ev=allEvents().filter(e=>e.start<=s&&e.end>=s&&(g==='all'||applicable(e,g)));html+=`<div class="day ${inside?'':'out'} ${[0,6].includes(d.getDay())?'weekend':''} ${teaching(s,g)?'':'closed'} ${ev.some(e=>e.type==='holiday')?'public-holiday':''}" data-date="${s}" title="${esc(ev.map(e=>e.name).join(' · '))}"><span class="number">${d.getDate()}</span>${ev.map(e=>`<span class="chip ${e.type}" data-id="${e.id}" draggable="${e.type!=='holiday'&&!e.official}" title="${esc(e.name)}">${e.type==='holiday'?'🔒 ':''}${esc(e.name)}${e.grade==='all'?'':' · '+e.grade+'학년'}</span>`).join('')}</div>`}return html+'</div>'}
-function renderCalendar(){let y=Math.floor(month/12),m=month%12;$('#monthTitle').textContent=annual?state.year+'학년도':`${y}년 ${m+1}월`;$('#view').textContent=annual?'월별 보기':'학년도 전체 보기';$('#calendarGrid').innerHTML=annual?'<div class="annual">'+Array.from({length:12},(_,i)=>{let n=state.year*12+2+i;return `<div class="mini" data-month="${n}"><h3>${Math.floor(n/12)}년 ${n%12+1}월</h3>${calendarHTML(Math.floor(n/12),n%12,true)}</div>`}).join('')+'</div>':calendarHTML(y,m);let ev=allEvents().filter(e=>annual||(e.start<=date(new Date(y,m+1,0,12))&&e.end>=date(new Date(y,m,1,12)))).filter(e=>$('#grade').value==='all'||applicable(e,$('#grade').value)).sort((a,b)=>a.start.localeCompare(b.start));$('#eventList').innerHTML=ev.length?ev.map(e=>`<div class="listitem" data-id="${e.id}"><b>${e.official?'🔒 ':''}${esc(e.name)}</b><small>${e.start.slice(5)}${e.start===e.end?'':' ~ '+e.end.slice(5)} · ${e.grade==='all'?'전체':e.grade+'학년'}</small></div>`).join(''):'<p class="muted">등록된 일정이 없습니다.</p>'}
+function renderCalendar(){selection=null;selectionGesture=null;let y=Math.floor(month/12),m=month%12;$('#monthTitle').textContent=annual?state.year+'학년도':`${y}년 ${m+1}월`;$('#view').textContent=annual?'월별 보기':'학년도 전체 보기';$('#calendarGrid').innerHTML=annual?'<div class="annual">'+Array.from({length:12},(_,i)=>{let n=state.year*12+2+i;return `<div class="mini" data-month="${n}"><h3>${Math.floor(n/12)}년 ${n%12+1}월</h3>${calendarHTML(Math.floor(n/12),n%12,true)}</div>`}).join('')+'</div>':calendarHTML(y,m);let ev=allEvents().filter(e=>annual||(e.start<=date(new Date(y,m+1,0,12))&&e.end>=date(new Date(y,m,1,12)))).filter(e=>$('#grade').value==='all'||applicable(e,$('#grade').value)).sort((a,b)=>a.start.localeCompare(b.start));$('#eventList').innerHTML=ev.length?ev.map(e=>`<div class="listitem" data-id="${e.id}">${e.official?'':'<button type="button" class="event-delete" data-delete>삭제</button>'}<b>${e.official?'🔒 ':''}${esc(e.name)}</b><small>${e.start.slice(5)}${e.start===e.end?'':' ~ '+e.end.slice(5)} · ${e.grade==='all'?'전체':e.grade+'학년'}</small></div>`).join(''):'<p class="muted">등록된 일정이 없습니다.</p>'}
 function edit(id,start,end){if(allEvents().some(e=>e.id===id&&e.official)){toast('자동 반영된 공휴일입니다. 날짜 변경·삭제는 잠겨 있습니다.');return}editing=id;let e=state.events.find(e=>e.id===id);$('#editorTitle').textContent=e?'일정 수정':'일정 등록';$('#name').value=e?.name||'';$('#type').value=e?.type||'event';$('#start').value=e?.start||start;$('#end').value=e?.end||end||start;$('#eventGrade').value=e?.grade||$('#grade').value;$('#delete').classList.toggle('hidden',!e);$('#editor').showModal()}
 $('#calendarGrid').addEventListener('click',e=>{if(annual){let mini=e.target.closest('.mini');if(mini){month=+mini.dataset.month;annual=false;renderCalendar()}return}let chip=e.target.closest('[data-id]');if(chip)edit(chip.dataset.id);});
-$('#calendarGrid').addEventListener('pointerdown',e=>{if(annual||e.target.closest('[data-id]')||e.button!==0)return;let cell=e.target.closest('[data-date]');if(cell){selection={start:cell.dataset.date,end:cell.dataset.date};cell.classList.add('selected');e.preventDefault()}});
-$('#calendarGrid').addEventListener('pointerover',e=>{if(!selection)return;let cell=e.target.closest('[data-date]');if(!cell)return;selection.end=cell.dataset.date;let a=[selection.start,selection.end].sort();document.querySelectorAll('[data-date]').forEach(c=>c.classList.toggle('selected',c.dataset.date>=a[0]&&c.dataset.date<=a[1]))});
-document.addEventListener('pointerup',()=>{if(selection){let a=[selection.start,selection.end].sort();selection=null;edit(null,...a)}});
+const calendarGrid = $('#calendarGrid');
+function showSelection(range) {
+  const dates = range ? [range.start, range.end].sort() : [];
+  calendarGrid.querySelectorAll('[data-date]').forEach(cell => {
+    const day = cell.dataset.date;
+    cell.classList.toggle('selected', !!range && day >= dates[0] && day <= dates[1]);
+  });
+}
+calendarGrid.addEventListener('pointerdown', event => {
+  if (annual || selectionGesture || event.target.closest('[data-id]') || event.button !== 0) return;
+  const cell = event.target.closest('[data-date]');
+  if (!cell) return;
+  const day = cell.dataset.date;
+  selectionGesture = {
+    pointerId: event.pointerId,
+    start: day,
+    end: day,
+    wasSelected: cell.classList.contains('selected'),
+    moved: false
+  };
+  if (!selectionGesture.wasSelected) showSelection(selectionGesture);
+});
+document.addEventListener('pointermove', event => {
+  if (selectionGesture?.pointerId !== event.pointerId) return;
+  const cell = document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-date]');
+  if (!cell || !calendarGrid.contains(cell) || cell.dataset.date === selectionGesture.end) return;
+  selectionGesture.end = cell.dataset.date;
+  selectionGesture.moved = true;
+  showSelection(selectionGesture);
+});
+document.addEventListener('pointerup', event => {
+  if (selectionGesture?.pointerId !== event.pointerId) return;
+  const { start, end, wasSelected, moved } = selectionGesture;
+  selectionGesture = null;
+  selection = !moved && wasSelected ? null : { start, end };
+  showSelection(selection);
+});
+document.addEventListener('pointercancel', event => {
+  if (selectionGesture?.pointerId !== event.pointerId) return;
+  selectionGesture = null;
+  showSelection(selection);
+});
 $('#calendarGrid').addEventListener('dragstart',e=>{let chip=e.target.closest('[data-id]');if(chip){dragId=chip.dataset.id;e.dataTransfer.setData('text/plain',dragId)}});
 $('#calendarGrid').addEventListener('dragover',e=>{if(!annual)e.preventDefault()});
 $('#calendarGrid').addEventListener('drop',e=>{e.preventDefault();let cell=e.target.closest('[data-date]'),ev=state.events.find(x=>x.id===e.dataTransfer.getData('text/plain'));if(!cell||!ev||ev.type==='holiday')return;let delta=Math.round((parse(cell.dataset.date)-parse(ev.start))/86400000),newEnd=shift(ev.end,delta),[a,b]=bounds();if(cell.dataset.date<a||newEnd>b)return toast('학년도 범위 안으로 이동하세요.');checkpoint();ev.start=cell.dataset.date;ev.end=newEnd;save();toast('일정을 이동했습니다. 연간 편성 초안도 검토하세요.')});
-$('#eventList').onclick=e=>{let el=e.target.closest('[data-id]');if(el)edit(el.dataset.id)};
+$('#eventList').onclick = event => {
+  const row = event.target.closest('[data-id]');
+  if (!row) return;
+  if (event.target.closest('[data-delete]')) {
+    const item = state.events.find(item => item.id === row.dataset.id);
+    if (item && confirm(`‘${item.name}’ 일정을 삭제할까요?`)) deleteEvent(item.id);
+    return;
+  }
+  edit(row.dataset.id);
+};
 $('#eventForm').onsubmit=e=>{e.preventDefault();let start=$('#start').value,end=$('#end').value,[a,b]=bounds();if(start>end||start<a||end>b)return toast('학년도 안의 올바른 기간을 선택하세요.');checkpoint();let item={id:editing||crypto.randomUUID(),name:$('#name').value.trim(),type:$('#type').value,start,end,grade:$('#eventGrade').value};if(!item.name)return;let i=state.events.findIndex(x=>x.id===editing);if(i<0)state.events.push(item);else state.events[i]=item;$('#editor').close();save();toast('일정과 수업일수를 갱신했습니다.')};
-$('#delete').onclick=()=>{checkpoint();state.events=state.events.filter(e=>e.id!==editing);$('#editor').close();save()};$('#add').onclick=()=>{let n=month;edit(null,`${Math.floor(n/12)}-${pad(n%12+1)}-01`)};
+function deleteEvent(id) {
+  if (!state.events.some(item => item.id === id)) return;
+  checkpoint();
+  state.events = state.events.filter(item => item.id !== id);
+  if ($('#editor').open) $('#editor').close();
+  save();
+  toast('일정을 삭제했습니다.');
+}
+$('#delete').onclick = () => deleteEvent(editing);
+$('#add').onclick = () => {
+  if (selection) {
+    const dates = [selection.start, selection.end].sort();
+    edit(null, ...dates);
+    return;
+  }
+  edit(null, `${Math.floor(month / 12)}-${pad(month % 12 + 1)}-01`);
+};
 $('#prev').onclick=()=>{month=Math.max(state.year*12+2,month-1);renderCalendar()};$('#next').onclick=()=>{month=Math.min(state.year*12+13,month+1);renderCalendar()};$('#view').onclick=()=>{annual=!annual;renderCalendar()};$('#grade').onchange=render;
 for(let y=2025;y<=2035;y++)$('#year').add(new Option(y+'학년도',y));$('#year').value=state.year;['grade','eventGrade','hourGrade','planGrade'].forEach(id=>{for(let g=1;g<=6;g++)$('#'+id).add(new Option(g+'학년',String(g)))});
 $('#year').onchange=()=>{checkpoint();db.current=+$('#year').value;state=db.years[db.current]||defaults(db.current);month=state.year*12+2;save(false)};$('#school').onchange=()=>{checkpoint();state.school=$('#school').value;save(false)};$('#semester').onchange=()=>{let v=$('#semester').value,[a,b]=bounds();if(v<a||v>b){$('#semester').value=state.semester;return toast('학년도 안의 날짜를 선택하세요.')}checkpoint();state.semester=v;save()};
